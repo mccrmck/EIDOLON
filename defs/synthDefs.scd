@@ -1,9 +1,9 @@
 ///////////////////////////////////////////////////////EIDOLON Stereo Synths//////////////////////////////////////////////////////////////////////
 (
-SynthDef(\inSimen,{
+SynthDef(\simenIn,{
 	var sig;
-	var heart = SoundIn.ar(\inBus.kr);
-	var drum  = SoundIn.ar(\inBus.kr);
+	var heart = SoundIn.ar(\heartIn.kr);
+	var drum = SoundIn.ar(\drumIn.kr);
 
 	drum = BHiShelf.ar(drum,\dFreqHi.kr(3000),\rsHi.kr(0.5),0);
 	drum = BLowShelf.ar(drum,\dFreqLo.kr(80),\rsLo.kr(0.25),0);
@@ -21,11 +21,11 @@ SynthDef(\inSimen,{
 
 }).add;
 
-SynthDef(\inPlayer,{
+SynthDef(\eidolonIn,{
 	var sig = SoundIn.ar(\inBus.kr);
-	sig = BHiShelf.ar(sig,\fFreqHi.kr(3000),\rsHi.kr(0.5),0);
-	sig = BLowShelf.ar(sig,\fFreqLo.kr(80),\rsLo.kr(0.25),0);
-	sig = Compander.ar(sig,sig,\compThresh.kr(0.5),1,0.5,0.01,0.11);
+	sig = BHiShelf.ar(sig,\fFreqHi.kr(10000),\rsHi.kr(1),0);
+	sig = BLowShelf.ar(sig,\fFreqLo.kr(80),\rsLo.kr(1),0);
+	sig = Compander.ar(sig,sig,\compThresh.kr(0.5),1,0.5,0.01,0.1,2);
 
 	Out.ar(\sendBus.kr,sig);
 	sig = Pan2.ar(sig,\pan.kr(0),\amp.kr(1));
@@ -34,12 +34,12 @@ SynthDef(\inPlayer,{
 }).add;
 
 SynthDef(\analyser, {
-	var freq,hasFreq,density,meanIOI,varianceIOI;
+	var density,meanIOI,varianceIOI,freq,hasFreq,specs;
 
 	var sig = In.ar(\inBus.kr,1);
 	var amp = Amplitude.kr(sig);
 	var silence = DetectSilence.ar(sig + Impulse.ar(0),\silenceThresh.kr(0.01));
-	var chain = FFT(LocalBuf(\frames.kr(1024)),sig);
+	var chain = FFT(LocalBuf(\frames.kr(2048)),sig);
 	var onsets = Onsets.kr(chain,\onsetThresh.kr(0.2), \rcomplex);
 	var centroid = SpecCentroid.kr(chain);
 	var specFlatness = SpecFlatness.kr(chain);
@@ -47,74 +47,42 @@ SynthDef(\analyser, {
 	var time = Sweep.ar;
 	var trigRate = \trigRate.kr(4);
 
-	# density, meanIOI, varianceIOI = OnsetStatistics.kr(onsets,trigRate * 2);   // scaled to trigRate == 2 seconds...or?
+	# density, meanIOI, varianceIOI = OnsetStatistics.kr(onsets,2);
 	# freq, hasFreq = Pitch.kr(LPF.ar(sig,3000),minFreq: 20,maxFreq: 5000, ampThreshold: 0.02, median: 7);
 
-	specs = [amp,silence,onsets,centroid,specFlatness,freq.explin(20,5000,0.0,1.0),hasFreq,density,meanIOI,varianceIOI];
+	specs = [amp,silence,onsets,centroid.explin(20,20000,0,1),specFlatness,freq.explin(20,5000,0.0,1.0),hasFreq,density.linlin(0,20,0,1),meanIOI.clip(0,1),varianceIOI.clip(0,1),time];
 	SendReply.kr(Impulse.kr(trigRate), '/analysis', specs);
 	Out.kr(\analBus.kr(0),specs);                                                // Must test...also check if DetectSilence.ar needs A2K?
 
 }).add;
 
-/*
-
-// what do we do here, hmmmmm?
-
-SynthDef(\switcher,{
-var in = In.ar(\inBus.kr,2);
-var sig = FreeVerb.ar(HPF.ar(in,250),1,0.9,\damp.kr(0.7));
-
-sig = LPF.ar(sig,\lpfFreq.kr().clip(20,20000));
-sig = HPF.ar(sig,\hpfFreq.kr().clip(20,20000));
-
-sig = in + (sig * \mix.kr(0.1));
-
-Out.ar(\out.kr,sig);
-}).add;
-
-SynthDef(\globalOut,{
-var freq,hasFreq,density,meanIOI,varianceIOI;
-
-var in = In.ar(\inBus.kr,2);
-var sig = Mix(in);
-
-var amp = Amplitude.kr(sig);
-var silence = DetectSilence.ar(sig + Impulse.ar(0),\silenceThresh.kr(0.01));
-var chain = FFT(LocalBuf(\frames.kr(1024)),sig);
-var onsets = Onsets.kr(chain,\onsetThresh.kr, \rcomplex);
-var centroid = SpecCentroid.kr(chain);
-var specFlatness = SpecFlatness.kr(chain);
-
-var time = Sweep.ar;
-var trig = Impulse.kr(\trigRate.kr(4));
-
-# freq, hasFreq = Pitch.kr(LPF.ar(sig,2000), ampThreshold: 0.01, median: 7);
-# density, meanIOI, varianceIOI = OnsetStatistics.kr(onsets,3.0);
-
-SendReply.kr(trig, '/globalAnalysis', [amp,silence,freq,hasFreq,onsets,centroid,specFlatness,density,meanIOI,varianceIOI,time]);
-
-in = Compander.ar(in,in,\compThresh.kr,1,0.5,0.01,0.01,\amp.kr(1));
-Out.ar(\out.kr,in);
-
-}).add;
-
-*/
-
 SynthDef(\recorder,{
 	var sig = In.ar(\inBus.kr);
 	sig = Compander.ar(sig,sig,0.5,1,1/4,0.01,0.1,3);
-	RecordBuf.ar(sig,\bufnum.kr, doneAction: 2);
+	RecordBuf.ar(sig,\bufnum.kr,loop:0, doneAction: 2);
 }).add;
 
-SynthDef(\reverb,{
+SynthDef(\monoInVerb,{
 	var sig = In.ar(\inBus.kr);
 	sig = HPF.ar(sig,350);
-	sig = FreeVerb.ar(sig,1,0.9,\damp.kr(0.7));
+	sig = FreeVerb.ar(sig,1,0.9,\damp.kr(0.9));
+	sig = LPF.ar(sig,\lpfFreq.kr(12000));
+	sig = HPF.ar(sig,\hpfFreq.kr(250));
+	sig = Pan2.ar(sig,\pan.kr(0),\amp.kr(0.8));
+	Out.ar(\out.kr,sig);
+}).add;
 
-	sig = LPF.ar(sig,\lpfFreq.kr().linexp(0,1,20,20000));
-	sig = HPF.ar(sig,\hpfFreq.kr().linexp(0,1,20,20000));
+SynthDef(\outWithVerb,{
+	var in = In.ar(\inBus.kr,2);
+	var sig = HPF.ar(in,350);
+	in = Compander.ar(in,sig,\compThresh.kr(0.5),1,0.5,0.01,0.1,2);
+	sig = FreeVerb.ar(sig.sum,1,0.9,\damp.kr(0.9));
+	sig = LPF.ar(sig,\lpfFreq.kr(12000));
+	sig = HPF.ar(sig,\hpfFreq.kr(250));
 
-	sig = Pan2.ar(sig,\pan.kr(0),\amp.kr(0.8) / 2); // amp scaling because this reverb is ridiculous....
+	sig = (sig * \verbMix.kr(0.1)) + in;
+	sig = HPFSide.ar(sig,40);
+	sig = Balance2.ar(sig[0],sig[1],\pan.kr(0),\amp.kr(0.8));
 	Out.ar(\out.kr,sig);
 
 }).add;
@@ -148,7 +116,7 @@ SynthDef(\freezeBells,{
 	sig = FFT(LocalBuf(1024),sig);
 	sig = PV_Freeze(sig,1);
 	sig = PV_BrickWall(sig,ramp);
-	sig = IFFT(chain)!2;
+	sig = IFFT(sig)!2;
 	sig = AllpassC.ar(sig,0.2,0.2,1.0);
 	sig = Splay.ar(sig * ramp.abs,ramp.abs.reciprocal / 1000,\amp.kr(0.8));
 	Out.ar(\out.kr,sig);
@@ -170,6 +138,15 @@ SynthDef(\clicks,{
 
 }).add;
 
+SynthDef(\noiseBurst,{
+	var sig = PinkNoise.ar(1!2);
+	sig = sig * Env.perc(0.01,0.6).kr(2);
+	sig = HPFSide.ar(sig,40);
+	sig = LeakDC.ar(sig);
+	sig = Balance2.ar(sig[0],sig[1],\pan.kr(0),\amp.kr(1));
+	Out.ar(\out.kr,sig);
+}).add;
+
 SynthDef(\tester,{
 	var sig = In.ar(\inBus.kr);
 	var silence = DetectSilence.ar(sig + Impulse.ar(0),\silenceThresh.kr(0.1));
@@ -179,6 +156,4 @@ SynthDef(\tester,{
 	SendReply.kr(Impulse.kr(20),'/calibrate',[silence, onsets]);
 
 }).add;
-
-"Stereo transforms loaded".postln;
 )

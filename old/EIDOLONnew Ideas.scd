@@ -29,33 +29,8 @@ TO ADD:
 
 
 // normalize all synthdef args/inputs and bus output
-// get rid of the dB stuff -> go to amp!
 
 ///////////////////PLUTA'S PROCESSES...AND MORE//////////////
-
-
-
-
-
-
-
-
-
-
-
-
-e = EIDOLON([0,1],0,60 * 10)
-
-e.calibrate
-e.play
-e.reset
-
-
-
-
-
-
-
 
 
 //spectralDelay...

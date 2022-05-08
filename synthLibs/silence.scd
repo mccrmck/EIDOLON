@@ -1,23 +1,29 @@
 (
-tesla: {
-	var carfreq = \carFreq.kr(1.3);
-	var mod = SinOscFB.ar(\modfreq.kr(8000) * Dust.ar(LFNoise0.kr(0.3).range(0.2,10)).lag,\modFB.kr(3));
-	var car = LFTri.ar([carfreq,carfreq*1.05],pi,0.5,0.5)+mod;
-	var sig = car*mod;
-	sig = BHiPass4.ar(sig,100,2);
-	sig = BLowPass4.ar(sig,\filt.kr(8000),\rq.kr(1));
+noise: {
+	var ctrlIn0 = In.kr(\ctrlIn0.kr);
+	var ctrlIn1 = In.kr(\ctrlIn1.kr);
+	var trigIn = In.kr(\trigIn.kr);
+
+	var sig = LFNoise0.ar(ctrlIn0.linexp(0,1,4,200));
+	var toggle = ToggleFF.kr(trigIn) * 2 - 1;
+	sig = CombC.ar(sig,0.2,ctrlIn1.linexp(0,1,200,60).reciprocal,ctrlIn0 * toggle);
+	sig = (sig * \gain.kr(3)).fold2;
 	sig = LeakDC.ar(sig);
-	sig = sig * \amp.kr(0.08);
+	sig = Pan2.ar(sig,\pan.kr(0),\amp.kr(1));
 },
 
 shiftReg: {
-	var freq = In.kr(~controlBus[0]["specFlatnessBus"]).linlin(0,1.0,0.1,8.0);
-	var counter = In.kr(~controlBus[0]["silenceBus"]).linlin(0,1.0,1,10);
-	var sr = SampleRate.ir/ \sampleRate.kr(12);
-	var n = 12;     // bit resolution: bits.clip(12,24);
-	var t= Phasor.ar(1,freq*((2**n)/sr),0,((2**n)-1));
+	var ctrlIn0 = In.kr(\ctrlIn0.kr);
+	var ctrlIn1 = In.kr(\ctrlIn1.kr);
+	var trigIn = In.kr(\trigIn.kr);
 
-	counter = LFNoise0.kr(counter).range(0,7).floor;
+	var freq = ctrlIn0.linexp(0,1,0.1,8);
+	var bits = ctrlIn0.linlin(0,1,0.1,8);
+	var sRate = ctrlIn1.linexp(0,1,12,1);
+	var counter = TChoose.kr(trigIn,(0..6));
+	var sr = SampleRate.ir/ sRate;
+	var n = 12;                                            // bit resolution: bits.clip(12,24);
+	var t= Phasor.ar(1,freq * ((2**n)/sr),0,((2**n)-1));
 
 	t = Select.ar(counter,[
 
@@ -32,7 +38,7 @@ shiftReg: {
 
 	t = t % (2**(n));
 	t = t * (0.5**(n-1)) - 1;
-	t = Pan2.ar(t,Latch.kr(LFNoise2.kr(0.4).range(-0.8,0.8),Changed.kr(A2K.kr(t))),\amp.kr(0.1));
+	t = Pan2.ar(t,0,\amp.kr(0.25));
 	t = LeakDC.ar(t);
 },
 )
