@@ -1,2 +1,2 @@
 # EIDOLON
-WIP improvising algorithm - constantly undergoiong revision!
+WIP interactive improvising algorithm - constantly undergoiong revision!
