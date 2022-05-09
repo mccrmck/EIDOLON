@@ -69,10 +69,12 @@ EIDOLON {
 
 	arm {
 		Ndef(\input,\eidolonIn).set( // all Ndef keys need to be given better names...maybe using hashes or something??? What if I want to run multiple instances??!?!
-			// Ndef(\input,\eidolonIn).set( // need to have a Simen version here!!!
+			// Ndef(\input,\simenIn).set( // need to have a Simen version here!!!
 			\amp,0,
 			\compThresh,0.5,
-			\inBus,inBus,
+			// \inBus,inBus,
+			// \heartIn,inBus[0],
+			// \drumIn,inBus[1],
 			\sendBus,sendBus,
 			\out,outBus,
 		).play(group:inGroup);
@@ -102,11 +104,13 @@ EIDOLON {
 	play { |verbose = true|
 
 		this.stopCalibrate;
+		Ndef(\listener).set(\resetTime,1);
 		this.makeListener;
 	}
 
 	stop {
 		//free the groups?
+		this.stopCalibrate;
 		listener.free;
 		synthArrays.keysValuesDo({ |key,array|
 			array.do({ |synthKey|
@@ -128,13 +132,13 @@ EIDOLON {
 
 	calibrate {
 
-		Ndef(\listener).set(\trigRate,10);
+		Ndef(\listener).set(\trigRate,4);
 		calibrator = OSCFunc({ |msg, time, addr, recvPort|
 			var silence = msg[4];
 			var onsets = msg[5];
 
-			if(silence == 1,{"silence detected".postln});
-			if(onsets == 1,{"onset detected".postln});
+			if(silence == 1,{ "silence detected".postln });
+			if(onsets == 1,{ "onset detected".postln });
 
 		},'/analysis');
 	}
@@ -145,9 +149,9 @@ EIDOLON {
 	}
 
 	makeListener { |verbose = true|
-		var pollRateSec = 10;                                                                 // this gets passed in? It should be the same arg as trigRate in the \analysis Ndef
+		var pollRateSec = 4;                        // this gets passed in? It should be the same arg as trigRate in the \analysis Ndef
 		var memLength = pollRateSec * 4;              // in seconds
-		var minPhraseLength = 30;                     // in seconds
+		var minPhraseLength = 45;                     // in seconds
 		var minStateLength = pollRateSec * performanceLength * 0.05;  // min state length
 
 		var maxVoices = 3;                            // polyphony; this can be passed in as an argument also!
@@ -159,15 +163,15 @@ EIDOLON {
 			var recentAmp          = memory['pastAmp'][..memLength].median;
 			var currentSilence     = msg[4];
 			var recentSilence      = memory['pastSilence'][..memLength].mean;
-			var currentFreq        = msg[5];
-			var recentFreq         = memory['pastFreq'][..memLength].median;
-			var currentHasFreq     = msg[6];
-			var recentHasFreq      = memory['pastHasFreq'][..memLength].mean;
-			var onsets             = msg[7];
-			var currentCentroid    = msg[8];
+			var onsets             = msg[5];
+			var currentCentroid    = msg[6];
 			var recentCentroid     = memory['pastCentroid'][..memLength].median;
-			var currentFlatness    = msg[9];
+			var currentFlatness    = msg[7];
 			var recentFlatness     = memory['pastFlatness'][..memLength].median;
+			var currentFreq        = msg[8];
+			var recentFreq         = memory['pastFreq'][..memLength].median;
+			var currentHasFreq     = msg[9];
+			var recentHasFreq      = memory['pastHasFreq'][..memLength].mean;
 			var currentDensity     = msg[10];
 			var recentDensity      = memory['pastDensity'][..memLength].median;
 			var currentMeanIOI     = msg[11];
@@ -193,7 +197,7 @@ EIDOLON {
 					if( (memory['state'][..minStateLength.asInteger].indicesOfEqual(currentState) ? 0 ).asArray.last == minStateLength,{  // this statement could be the cause of trouble???
 						case
 						{memory['state'].first == "ignore"}{state = ["support","ignore"].wchoose([0.85,0.15])}
-						{memory['state'].first == "support"}{state = ["support","tacet","ignore"].wchoose([0.85,0.05,0.1])}
+						{memory['state'].first == "support"}{state = ["support","ignore"].wchoose([0.85,0.15])}
 						// {memory["state"].first == "contrast"}{state = ["contrast","ignore"].wchoose([0.65,0.35])}
 						{memory['state'].first == "tacet"}{state = ["support","ignore"].wchoose([0.75,0.25])}
 					},{
@@ -204,8 +208,8 @@ EIDOLON {
 			{currentTime >= performanceLength}{state = "tacetDone"};  // this could also call some other function that neatly wraps up the performance?
 
 			if(verbose,{
-				"\rcurrentAmp: % \rrecentAmp: % \rcurrentAilence: % \rrecentAilence: % \rcurrentFreq: % \rrecentFreq: % \rcurrentHasFreq: % \rrecentHasFreq: % \ronsets: % \rcurrentCentroid: % \rrecentCentroid: % \rcurrentFlatness: % \rrecentFlatness: % \rcurrentDensity: % \rrecentDensity: % \rcurrentMeanIOI: % \rrecentMeanIOI: % \rcurrentVarianceIOI: % \rrecentVarianceIOI: % \rcurrentTime: %".format(currentAmp, recentAmp, currentSilence,
-					recentSilence, currentFreq, recentFreq, currentHasFreq, recentHasFreq, onsets, currentCentroid,recentCentroid, currentFlatness,
+				"\rcurrentAmp: % \rrecentAmp: % \rcurrentSilence: % \rrecentSilence: % \rcurrentFreq: % \rrecentFreq: % \rcurrentHasFreq: % \rrecentHasFreq: % \ronsets: % \rcurrentCentroid: % \rrecentCentroid: % \rcurrentFlatness: % \rrecentFlatness: % \rcurrentDensity: % \rrecentDensity: % \rcurrentMeanIOI: % \rrecentMeanIOI: % \rcurrentVarianceIOI: % \rrecentVarianceIOI: % \rcurrentTime: %"
+				.format(currentAmp, recentAmp, currentSilence, recentSilence, currentFreq, recentFreq, currentHasFreq, recentHasFreq, onsets, currentCentroid,recentCentroid, currentFlatness,
 					recentFlatness, currentDensity, recentDensity, currentMeanIOI, recentMeanIOI, currentVarianceIOI, recentVarianceIOI, currentTime).postln;
 
 				state.postln;
@@ -231,10 +235,9 @@ EIDOLON {
 
 
 					//"densePerc"
-					if(recentHasFreq <= 0.3
-						and: { recentDensity >= 0.35 }
+					if(recentAmp >= -18
+						and: { recentDensity >= 0.3 }
 						and: { recentSilence <= 0.35 }
-						and: { recentCentroid >= 0.7 }
 						and: { keyList.size <= maxVoices }
 						and: { currentEvent == 0 },{
 							var key = synthArrays['perc'][0].asSymbol;
@@ -416,9 +419,14 @@ EIDOLON {
 			synthArrays.keysValuesDo({ |subLibKey,synthKeyArray|
 				synthKeyArray.do({ |synthKey|
 					var phraseDur = pollRateSec * performanceLength * 0.15;
-					if(Ndef(synthKey.asSymbol).isPlaying.not and: { (memory['events'][..phraseDur.asInteger].indicesOfEqual(synthKey) ? 0).asArray.last % phraseDur == 0},{  //this logic doesn't work
+					if((memory['events'][..phraseDur.asInteger].indicesOfEqual(synthKey) ? 0).asArray.last == phraseDur,{  // does this work /make sense???
 						var nowSynth = synthKey;
 						var newSynth = synthKeyArray[1];
+
+						if(Ndef(synthKey).isPlaying,{
+							Ndef(synthKey).end(fadeTime);
+							"% OFF".format(synthKey).postln;
+						});
 
 						"rotating %, introducing %".format(nowSynth, newSynth).postln;
 						synthKeyArray = synthKeyArray.rotate(-1);
@@ -450,7 +458,7 @@ EIDOLON {
 		var window = Window("EIDOLON",bounds);
 		var flow = window.addFlowLayout(15@15,4@4);
 
-		var dbSlider = {|label,actionFunc|
+		var dbSlider = { |label,actionFunc|
 			var slide = EZSlider(
 				parent: window,
 				bounds: 60@300,

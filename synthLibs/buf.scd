@@ -46,7 +46,7 @@ tGrains: {
 	var trigIn = In.kr(\trigIn.kr);
 	var sig, bufnum = \bufnum.kr;
 
-	var rate = ctrlIn.linexp(0,1,0.5,2.0);
+	var rate = ctrlIn.linexp(0,1,0.8,2.0);
 	var bufDur = BufDur.kr(bufnum);
 	var offset = Rand(0,bufDur);
 	var pointer = Phasor.ar(0,1,0,bufDur);

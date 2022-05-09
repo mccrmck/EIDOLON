@@ -29,7 +29,7 @@ bitz: {
 
 	var sig = In.ar(\inBus.kr,1);
 	sig = Decimator.ar(sig,SampleRate.ir * ctrlIn.linlin(0,1,0.05,0.2), 24 * ctrlIn.linlin(0,1,0.05,0.5));    //add limiter???
-	sig = Limiter.ar(sig,0.3);
+	sig = Limiter.ar(sig,1);
 	sig = Pan2.ar(sig,LFNoise2.kr(0.2).range(-0.8,0.8),\amp.kr(0.8));
 },
 )

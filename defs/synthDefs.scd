@@ -2,16 +2,21 @@
 (
 SynthDef(\simenIn,{
 	var sig;
-	var heart = SoundIn.ar(\heartIn.kr);
-	var drum = SoundIn.ar(\drumIn.kr);
+	var heart = SoundIn.ar(\heartIn.kr());
+	var drum = SoundIn.ar(\drumIn.kr()) * 0.5;
 
-	drum = BHiShelf.ar(drum,\dFreqHi.kr(3000),\rsHi.kr(0.5),0);
-	drum = BLowShelf.ar(drum,\dFreqLo.kr(80),\rsLo.kr(0.25),0);
-	drum = Compander.ar(drum,drum,\compThresh.kr(0.5),1,1/3,0.01,0.1);
+	// drum = BHiShelf.ar(drum,\dFreqHi.kr(3000),\rsHi.kr(0.5),0);
+	// drum = BLowShelf.ar(drum,\dFreqLo.kr(80),\rsLo.kr(0.25),0);
+	drum = Compander.ar(drum,drum,\compThresh.kr(0.5),1,1/3,0.01,0.1,1) * \drumMute.kr(0);
 
-	heart = (heart * \hGain.kr(1)).tanh;
-	heart = BPF.ar(heart,\hFreq.kr(80),\rq.kr(0.5));
-	heart = Compander.ar(heart,heart,\compThresh.kr(0.5),1,1/4,0.01,0.1,);
+	heart = HPF.ar(heart,40);
+	heart = Compander.ar(heart,HPF.ar(heart,80),0.125,1,1/8,0.01,0.1,8);
+	heart = (heart * \hGain.kr(4)).tanh;
+	heart = MidEQ.ar(heart,150,1,6);
+	heart = Compander.ar(heart,heart,0.125,1,1/4,0.01,0.1,1);
+	heart = LPF.ar(heart,150);
+	heart = (heart * \hGain.kr(4)).tanh;
+	heart = heart * -12.dbamp * \heartMute.kr(1);
 
 	sig = [heart,drum].sum;
 
@@ -39,12 +44,12 @@ SynthDef(\analyser, {
 	var sig = In.ar(\inBus.kr,1);
 	var amp = Amplitude.kr(sig);
 	var silence = DetectSilence.ar(sig + Impulse.ar(0),\silenceThresh.kr(0.01));
-	var chain = FFT(LocalBuf(\frames.kr(2048)),sig);
+	var chain = FFT(LocalBuf(\frames.kr(1024)),sig);
 	var onsets = Onsets.kr(chain,\onsetThresh.kr(0.2), \rcomplex);
 	var centroid = SpecCentroid.kr(chain);
 	var specFlatness = SpecFlatness.kr(chain);
 
-	var time = Sweep.ar;
+	var time = Sweep.ar(\resetTime.tr);
 	var trigRate = \trigRate.kr(4);
 
 	# density, meanIOI, varianceIOI = OnsetStatistics.kr(onsets,2);
@@ -86,6 +91,8 @@ SynthDef(\outWithVerb,{
 	Out.ar(\out.kr,sig);
 
 }).add;
+
+// oneShots
 
 SynthDef(\snowSines, {
 	var rq = \rq.kr(0.5);
@@ -147,13 +154,4 @@ SynthDef(\noiseBurst,{
 	Out.ar(\out.kr,sig);
 }).add;
 
-SynthDef(\tester,{
-	var sig = In.ar(\inBus.kr);
-	var silence = DetectSilence.ar(sig + Impulse.ar(0),\silenceThresh.kr(0.1));
-	var chain = FFT(LocalBuf(\frames.kr(1024)),sig);
-	var onsets = Onsets.kr(chain,\onsetThresh.kr(0.2), \rcomplex);
-
-	SendReply.kr(Impulse.kr(20),'/calibrate',[silence, onsets]);
-
-}).add;
 )

@@ -4,7 +4,7 @@ noise: {
 	var ctrlIn1 = In.kr(\ctrlIn1.kr);
 	var trigIn = In.kr(\trigIn.kr);
 
-	var sig = LFNoise0.ar(ctrlIn0.linexp(0,1,4,200));
+	var sig = LFNoise0.ar(ctrlIn0.linexp(0,1,10,200));
 	var toggle = ToggleFF.kr(trigIn) * 2 - 1;
 	sig = CombC.ar(sig,0.2,ctrlIn1.linexp(0,1,200,60).reciprocal,ctrlIn0 * toggle);
 	sig = (sig * \gain.kr(3)).fold2;
