@@ -1,7 +1,7 @@
 (
 noise: {
-	var ctrlIn0 = In.kr(\ctrlIn0.kr);
-	var ctrlIn1 = In.kr(\ctrlIn1.kr);
+	var ctrlIn0 = In.kr(\ctrlIn0.kr).lag(1);
+	var ctrlIn1 = In.kr(\ctrlIn1.kr).lag(1);
 	var trigIn = In.kr(\trigIn.kr);
 
 	var sig = LFNoise0.ar(ctrlIn0.linexp(0,1,10,200));
@@ -13,8 +13,8 @@ noise: {
 },
 
 shiftReg: {
-	var ctrlIn0 = In.kr(\ctrlIn0.kr);
-	var ctrlIn1 = In.kr(\ctrlIn1.kr);
+	var ctrlIn0 = In.kr(\ctrlIn0.kr).lag(1);
+	var ctrlIn1 = In.kr(\ctrlIn1.kr).lag(1);
 	var trigIn = In.kr(\trigIn.kr);
 
 	var freq = ctrlIn0.linexp(0,1,0.1,8);

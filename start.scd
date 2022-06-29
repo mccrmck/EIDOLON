@@ -1,35 +1,30 @@
 
 
-
-
-
-// must fix no Buf synths in first ignore!
-// double check synth rotation condition...does it make more sense now? If it ends one synth, maybe it should start the next one immediately?
-// too much tacet - oscillating between support and tacet nearly...should maybe make things fade?
+// must fix no silence synths in first ignore!
 // should poll rate be faster?
 
-
-// tacet doesn't always work!! both buf ugens and shiftReg
-// shift delay doesn't work?
-// prioritize buf synths!!
-// linexp inf??
-// check all the toggles...
-// add long lags to ctrlIn signals?
+// limit freeze bells
 
 e.recIndex
 
-e = EIDOLON(0,0,60 * 7,10)
+e = EIDOLON([0,1],0,60 * 10,10)
 
+e.sendBus
 
 // start med hjerte, switch to snare, back to heart
 
-
 Ndef(\input).inspect
-Ndef(\input).set()
-Ndef(\input).set(\heartMute,0,\drumMute,1)
+
+// heartAmp == 0 when superballs start
+// heartAmp == 1 when mallets start
+Ndef(\input).set(\heartAmp,1)
+
+Safety.disable
+s.makeGui
 
 s.plotTree
-
+s.sendMsg("/n_free",1132)
+e.recIndex
 
 (
 Ndef(\test,{
@@ -58,3 +53,4 @@ Ndef(\test,{
 
 }).play
 )
+

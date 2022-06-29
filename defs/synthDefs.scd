@@ -3,12 +3,13 @@
 SynthDef(\simenIn,{
 	var sig;
 	var heart = SoundIn.ar(\heartIn.kr());
-	var drum = SoundIn.ar(\drumIn.kr()) * 0.5;
+	var drum = SoundIn.ar(\drumIn.kr());
 
 	// drum = BHiShelf.ar(drum,\dFreqHi.kr(3000),\rsHi.kr(0.5),0);
 	// drum = BLowShelf.ar(drum,\dFreqLo.kr(80),\rsLo.kr(0.25),0);
-	drum = Compander.ar(drum,drum,\compThresh.kr(0.5),1,1/3,0.01,0.1,1) * \drumMute.kr(0);
+	drum = Compander.ar(drum,drum,\compThresh.kr(0.5),1,1/3,0.01,0.1,1) * \drumAmp.kr(1);
 
+	/*
 	heart = HPF.ar(heart,40);
 	heart = Compander.ar(heart,HPF.ar(heart,80),0.125,1,1/8,0.01,0.1,8);
 	heart = (heart * \hGain.kr(4)).tanh;
@@ -16,7 +17,8 @@ SynthDef(\simenIn,{
 	heart = Compander.ar(heart,heart,0.125,1,1/4,0.01,0.1,1);
 	heart = LPF.ar(heart,150);
 	heart = (heart * \hGain.kr(4)).tanh;
-	heart = heart * -12.dbamp * \heartMute.kr(1);
+	*/
+	heart = heart * \heartAmp.kr(1);
 
 	sig = [heart,drum].sum;
 
@@ -97,7 +99,6 @@ SynthDef(\outWithVerb,{
 SynthDef(\snowSines, {
 	var rq = \rq.kr(0.5);
 	var freq = \freq.kr;
-
 	var sig = SinOsc.ar(freq) * BrownNoise.ar(0.5,0.5);
 	sig = RLPF.ar(sig,freq * 1.5,rq,1/rq.sqrt);               // weird amp function...I don't like it.
 	sig = Pan2.ar(sig,\pan.kr(0),\amp.kr * 0.7);
@@ -108,13 +109,12 @@ SynthDef(\snowSines, {
 
 SynthDef(\screech,{
 	var sig = SinOsc.ar(\freq.kr(80)) * Trig.kr(\trig.kr(1),0.04);
-	sig = CombC.ar(sig,0.04,0.04 * LFNoise0.ar(50).abs,6.0,1);
+	sig = CombC.ar(sig,0.04,0.04 * LFNoise0.ar(50).abs,6.0);
 	sig = Limiter.ar(sig,1.0);
 	sig = LeakDC.ar(sig);
 	sig = Pan2.ar(sig,\pan.kr(0),\amp.kr(0.8));
 	DetectSilence.ar(sig,doneAction:2);
 	Out.ar(\out.kr,sig);
-
 }).add;
 
 SynthDef(\freezeBells,{
@@ -124,25 +124,21 @@ SynthDef(\freezeBells,{
 	sig = PV_Freeze(sig,1);
 	sig = PV_BrickWall(sig,ramp);
 	sig = IFFT(sig)!2;
-	sig = AllpassC.ar(sig,0.2,0.2,1.0);
+	sig = AllpassC.ar(sig,0.2,0.2,1.0);                                          // wat
 	sig = Splay.ar(sig * ramp.abs,ramp.abs.reciprocal / 1000,\amp.kr(0.8));
 	Out.ar(\out.kr,sig);
-
 }).add;
 
 SynthDef(\clicks,{
 	var freq = \freq.kr;
 	var ts = \ts.kr;
-
 	var osc = SinOscFB.ar([freq,freq * 1.005],\feedback.kr);
-	var env = EnvGen.kr(Env.perc(),1,timeScale:ts,doneAction: 2);
 	var pan = IRand(-1,1);
-	var sig = osc*osc+osc;
-	sig = LPF.ar(sig*env,8000);
+	var sig = osc * osc + osc;
+	sig = LPF.ar(sig,8000) * Env.perc().kr(2,1,ts);
 	sig = LeakDC.ar(sig);
-	sig = Balance2.ar(sig[0],sig[1],Line.kr(pan,pan.neg,ts),\amp.kr(0.1));
+	sig = Balance2.ar(sig[0],sig[1],Line.kr(pan,pan.neg,ts),\amp.kr(0.1));   // this is weird....extreme panning on a stereo signal? Make it mono maybe?
 	Out.ar(\out.kr,sig);
-
 }).add;
 
 SynthDef(\noiseBurst,{

@@ -68,13 +68,13 @@ EIDOLON {
 	}
 
 	arm {
-		Ndef(\input,\eidolonIn).set( // all Ndef keys need to be given better names...maybe using hashes or something??? What if I want to run multiple instances??!?!
-			// Ndef(\input,\simenIn).set( // need to have a Simen version here!!!
+		// Ndef(\input,\eidolonIn).set( // all Ndef keys need to be given better names...maybe using hashes or something??? What if I want to run multiple instances??!?!
+		Ndef(\input,\simenIn).set( // need to have a Simen version here!!!
 			\amp,0,
 			\compThresh,0.5,
 			// \inBus,inBus,
-			// \heartIn,inBus[0],
-			// \drumIn,inBus[1],
+			\heartIn,inBus[0],
+			\drumIn,inBus[1],
 			\sendBus,sendBus,
 			\out,outBus,
 		).play(group:inGroup);
@@ -102,10 +102,12 @@ EIDOLON {
 	}
 
 	play { |verbose = true|
-
-		this.stopCalibrate;
-		Ndef(\listener).set(\resetTime,1);
-		this.makeListener;
+		Routine({                        // can I find a slick solution w/ CondVar here?
+			Ndef(\listener).set(\resetTime,1);
+			this.stopCalibrate;
+			1.wait;
+			this.makeListener;
+		}).play
 	}
 
 	stop {
@@ -132,23 +134,340 @@ EIDOLON {
 
 	calibrate {
 
-		Ndef(\listener).set(\trigRate,4);
+		Ndef(\listener).set(\trigRate,10);
 		calibrator = OSCFunc({ |msg, time, addr, recvPort|
 			var silence = msg[4];
 			var onsets = msg[5];
 
-			if(silence == 1,{ "silence detected".postln });
-			if(onsets == 1,{ "onset detected".postln });
+			"silence: % \nonset: % \n".format(silence.asBoolean,onsets.asBoolean).postln;
 
 		},'/analysis');
 	}
 
 	stopCalibrate {
-		Ndef(\listener).set(\trigRate,10);                       // pass original pollRate
+		Ndef(\listener).set(\trigRate,4);                       // pass original pollRate
 		calibrator.free;
 	}
 
 	makeListener { |verbose = true|
+		var pollRateSec = 4;                        // this gets passed in? It should be the same arg as trigRate in the \analysis Ndef
+		var memLength = pollRateSec * 4;              // in seconds
+		var minPhraseLength = 45;                     // in seconds
+		var minStateLength = pollRateSec * performanceLength * 0.05;  // min state length
+
+		var maxVoices = 3;                            // polyphony; this can be passed in as an argument also!
+		var ctrlBusArray = [0,3,4,5,7,8,9].collect({|i| analBus.subBus(i) });
+		var trigBusArray = [1,2,6].collect({|i| analBus.subBus(i) });
+
+		listener = OSCFunc({ |msg, time, addr, recvPort|
+			var currentAmp         = msg[3].ampdb;
+			var recentAmp          = memory['pastAmp'][..memLength].median;
+			var currentSilence     = msg[4];
+			var recentSilence      = memory['pastSilence'][..memLength].mean;
+			var onsets             = msg[5];
+			var currentCentroid    = msg[6];
+			var recentCentroid     = memory['pastCentroid'][..memLength].median;
+			var currentFlatness    = msg[7];
+			var recentFlatness     = memory['pastFlatness'][..memLength].median;
+			var currentFreq        = msg[8];
+			var recentFreq         = memory['pastFreq'][..memLength].median;
+			var currentHasFreq     = msg[9];
+			var recentHasFreq      = memory['pastHasFreq'][..memLength].mean;
+			var currentDensity     = msg[10];
+			var recentDensity      = memory['pastDensity'][..memLength].median;
+			var currentMeanIOI     = msg[11];
+			var recentMeanIOI      = memory['pastMeanIOI'][..memLength].median;
+			var currentVarianceIOI = msg[12];
+			var recentVarianceIOI  = memory['pastVarianceIOI'][..memLength].median;
+			var currentTime        = msg[13] - waitBeforeStartTime;
+
+			var currentEvent = 0, bufferEvent = 0, state;
+			var keyList = List.newClear();
+			var fadeTime = 0.08;
+
+			/* =======  timeLine  ========= */
+
+			case
+			{currentTime < 0}{state = "tacet" } // tacet
+			{currentTime >= 0 and: {currentTime < performanceLength} }{
+
+				if(currentTime < 60,{
+					state = "tacet";
+				},{
+					state = "EIDOLON";
+
+					synthArrays.keysValuesDo({ |key,array|
+						array.do({ |synthKey|
+							var key = synthKey.asSymbol;
+							if(Ndef(key).isPlaying,{ keyList.add(key) })
+						})
+					});
+
+					// "densePerc"
+					if(recentAmp >= -30
+						and: { recentDensity >= 0.3 }
+						and: { recentSilence <= 0.35 }
+						and: { keyList.size <= maxVoices }
+						and: { currentEvent == 0 },{
+							var key = synthArrays['perc'][0].asSymbol;
+
+							if(Ndef(key).isPlaying.not,{
+								Ndef(key,synthLib.subLibs['perc'][key])
+								.set(\inBus,sendBus,\ctrlIn,ctrlBusArray.choose,\trigIn,trigBusArray.choose)
+								.play(verbBus,fadeTime:fadeTime,group:inGroup,addAction:\addToTail);
+								currentEvent = key;
+								"% ON".format(key).postln
+							})
+						},{
+							var key = synthArrays['perc'][0];
+
+							if(Ndef(key).isPlaying
+								and: { memory['events'].indicesOfEqual(key).first ? 0 > (pollRateSec * minPhraseLength) },{     // prevents synths from turning off too quickly...
+									Ndef(key).end(fadeTime);
+									"% OFF".format(key).postln;
+							})
+					});
+
+					// "pitchTrack"
+					if(recentHasFreq > 0.6
+						and: { recentDensity >= 0.35 }
+						and: { recentSilence < 0.4 }
+						and: { keyList.size <= maxVoices }
+						and: { currentEvent == 0 },{
+							var key = synthArrays['pitch'][0].asSymbol;
+
+							if(Ndef(key).isPlaying.not,{
+								Ndef(key,synthLib.subLibs['pitch'][key])
+								.set(\inBus,sendBus,\ctrlIn,ctrlBusArray.choose,\trigIn,trigBusArray.choose)
+								.play(verbBus,fadeTime:fadeTime,group:inGroup,addAction:\addToTail);
+								currentEvent = key;
+								"% ON".format(key).postln;
+							})
+						},{
+							var key = synthArrays['pitch'][0].asSymbol;
+
+							if(Ndef(key.asSymbol).isPlaying
+								and: { memory['events'].indicesOfEqual(key).first ? 0 > (pollRateSec * minPhraseLength) },{
+									Ndef(key).end(fadeTime);
+									"% OFF".format(key).postln;
+							})
+					});
+
+					/*
+					// "fillSilence"
+					if(recentSilence > 0.88
+					and: {recentAmp <= -24}
+					and: {recentDensity < 0.2}
+					and: {keyList.size <= maxVoices}
+					and: {currentEvent == 0},{
+					var key = synthArrays['silence'][0].asSymbol;
+
+					if(Ndef(key).isPlaying.not,{
+					Ndef(key,synthLib.subLibs['silence'][key])
+					// .set(\inBus,sendBus)                                                                                     // do these have an \inBus argument?
+					.set(\ctrlIn0,ctrlBusArray.choose,\ctrlIn1,ctrlBusArray.choose,\trigIn,trigBusArray.choose)
+					.play(verbBus,fadeTime:fadeTime,group:inGroup,addAction:\addToTail);
+					currentEvent = key;
+					"% ON".format(key).postln;
+					})
+					},{
+					var key = synthArrays['silence'][0].asSymbol;
+
+					if(Ndef(key.asSymbol).isPlaying
+					and: { memory['events'].indicesOfEqual(key).first ? 0 > (pollRateSec * minPhraseLength) },{
+					Ndef(key).end(fadeTime);
+					"% OFF".format(key).postln;
+					})
+					});
+					*/
+
+					// "bufTransforms"
+					if(recIndex > 0
+						and: {recentAmp <= -24}
+						and: {recentSilence > 0.6}
+						and: {keyList.size <= maxVoices}
+						and: {currentEvent == 0},{
+							var key = synthArrays['buf'][0].asSymbol;
+
+							if(Ndef(key).isPlaying.not,{
+								Ndef(key,synthLib.subLibs['buf'][key])
+								.set(\bufnum,recBuffers[ (recIndex % recBuffers.size).rand ],\ctrlIn,ctrlBusArray.choose,\trigIn,trigBusArray.choose)
+								.play(verbBus,fadeTime:fadeTime,group:inGroup,addAction:\addToTail);
+								currentEvent = key;
+								"% ON".format(key).postln
+							})
+						},{
+							var key = synthArrays['buf'][0].asSymbol;
+
+							if(Ndef(key.asSymbol).isPlaying
+								and: { memory['events'].indicesOfEqual(key).first ? 0 > (pollRateSec * minPhraseLength) },{
+									Ndef(key).end(fadeTime);
+									"% OFF".format(key).postln
+							})
+					});
+
+					// "oneShots"
+					if(currentDensity <= 0.15
+						and: {recentAmp <= -24}
+						and: {currentHasFreq == 1}
+						and: {recentHasFreq > 0.5}
+						and: {keyList.size <= maxVoices}
+						and: {currentEvent == 0},{
+							if(memory['events'].indicesOfEqual("snowSines").isNil,{
+								Synth(\snowSines,[\atk,4.0.rrand(6.0),\rls,8.0.rrand(10.0),\pan,1.0.rand2,\amp,0.02.rrand(0.03),\freq,currentFreq.linexp(0,1,100,900),\outBus,verbBus]);
+								currentEvent = "snowSines";
+								"snowSines".postln;
+							},{
+								if(memory['events'].indicesOfEqual("snowSines").first > (pollRateSec * 3),{
+									Synth(\snowSines,[\atk,4.0.rrand(6.0),\rls,8.0.rrand(10.0),\pan,1.0.rand2,\amp,0.02.rrand(0.03),\freq,currentFreq.linexp(0,1,100,900),\outBus,verbBus]);
+									currentEvent = "snowSines";
+									"snowSines".postln;
+								})
+							});
+					});
+
+					if(memory['pastAmp'][..memLength].maxItem >= -25
+						and: {currentHasFreq == 1}
+						and: {recentFlatness > 0.1}
+						and: {keyList.size <= maxVoices}
+						and: {currentEvent == 0},{
+							if(memory['events'].indicesOfEqual("freezeBells").isNil,{
+								Synth(\freezeBells,[\inBus,sendBus,\outBus,verbBus], Ndef(\input).nodeID,\addAfter);
+								currentEvent = "freezeBells";
+								"freezeBells".postln;
+							},{
+								if(memory['events'].indicesOfEqual("freezeBells").first > (pollRateSec * 3),{
+									Synth(\freezeBells,[\inBus,sendBus,\outBus,verbBus], Ndef(\input).nodeID,\addAfter);
+									currentEvent = "freezeBells";
+									"freezeBells".postln;
+								})
+							});
+					});
+
+					if(currentDensity >= 0.7
+						and: {currentCentroid >= 0.7}
+						and: {currentAmp >= -18}
+						and: {keyList.size <= maxVoices}
+						and: {currentEvent == 0},{
+							if(memory['events'].indicesOfEqual("screech").isNil,{
+								Synth(\screech,[\freq,1000,\amp,0.18.rrand(0.25),\pan,1.0.rand2,\outBus,verbBus]);
+								currentEvent = "screech";
+								"screech".postln;
+							},{
+								if(memory['events'].indicesOfEqual("screech").first > (pollRateSec * 5),{
+									Synth(\screech,[\freq,1000,\amp,0.18.rrand(0.25),\pan,1.0.rand2,\outBus,verbBus]);
+									currentEvent = "screech";
+									"screech".postln;
+								})
+							});
+					});
+
+					if(recentCentroid > 0.72
+						and: {recentMeanIOI < 0.3}
+						and: {recentVarianceIOI < 0.1}
+						and: {keyList.size <= maxVoices}
+						and: {currentEvent == 0},{
+							if(memory['events'].indicesOfEqual("crawlers").isNil,{
+								Synth(\clicks,[\ts,1.exprand(4),\freq,0.001.exprand(0.01),\feedback,60,\amp,0.06,\outBus,verbBus]);
+								currentEvent = "crawlers";
+								"crawlers".postln;
+							},{
+								if(memory['events'].indicesOfEqual("crawlers").first > (pollRateSec * 4),{
+									Synth(\clicks,[\ts,1.exprand(4),\freq,0.001.exprand(0.01),\feedback,60,\amp,0.06,\outBus,verbBus]);
+									currentEvent = "crawlers";
+									"crawlers".postln;
+								})
+							});
+					});
+				});
+			}
+			{currentTime >= performanceLength}{
+				fadeTime = 10;
+
+				synthArrays.keysValuesDo({ |key,array|
+					array.do({ |synthKey|
+						var key = synthKey.asSymbol;
+						if(Ndef(key).isPlaying,{ Ndef(key).end(fadeTime) })
+					})
+				});
+				state = "tacetDone"
+
+			};
+
+			/* =======  info posting ========= */
+
+			if(verbose,{"\ncurrentAmp: % \nrecentAmp: % \ncurrentSilence: % \nrecentSilence: % \ncurrentFreq: % \nrecentFreq: % \ncurrentHasFreq: % \nrecentHasFreq: % \nonsets: % \ncurrentCentroid: %
+recentCentroid: % \ncurrentFlatness: % \nrecentFlatness: % \ncurrentDensity: % \nrecentDensity: % \ncurrentMeanIOI: % \nrecentMeanIOI: % \ncurrentVarianceIOI: % \nrecentVarianceIOI: % \ncurrentTime: %"
+				.format(currentAmp, recentAmp, currentSilence, recentSilence, currentFreq, recentFreq, currentHasFreq, recentHasFreq, onsets, currentCentroid,recentCentroid, currentFlatness,
+					recentFlatness, currentDensity, recentDensity, currentMeanIOI, recentMeanIOI, currentVarianceIOI, recentVarianceIOI, currentTime).postln;
+
+				state.postln;
+			});
+
+
+			/* =======  buffer recording ========= */
+
+			if( currentTime > 0
+				and: { recentAmp > -36 }
+				and: { recentSilence < 0.3 },{
+
+					case
+					{recIndex == 0}{
+						Synth(\recorder,[\inBus,sendBus,\bufnum,recBuffers[recIndex % recBuffers.size]], Ndef(\input).nodeID,\addAfter);
+						bufferEvent = "bufRec";
+						"Buffer % recording".format(recIndex).postln;
+						recIndex = recIndex + 1;
+					}
+					{recIndex > 0}{
+						if((memory['bufferEvents'].indicesOfEqual("bufRec") ? 0).asArray.first > (pollRateSec * 90),{                 // at least 45 secs between recordings...
+							Synth(\recorder,[\inBus,sendBus,\bufnum,recBuffers[recIndex % recBuffers.size]], Ndef(\input).nodeID,\addAfter);
+							bufferEvent = "bufRec";
+							"Buffer % recording".format(recIndex).postln;
+							recIndex = recIndex + 1;
+						})
+					}
+			});
+
+			/* =======  cycle synths ========= */
+
+			synthArrays.keysValuesDo({ |subLibKey,synthKeyArray|
+				synthKeyArray.do({ |synthKey|
+					var phraseDur = pollRateSec * performanceLength * 0.25;
+					if((memory['events'][..phraseDur.asInteger].indicesOfEqual(synthKey) ? 0).asArray.last == phraseDur,{  // does this work /make sense???
+						var nowSynth = synthKey;
+						var newSynth = synthKeyArray[1];
+
+						if(Ndef(synthKey).isPlaying,{
+							Ndef(synthKey).end(fadeTime);
+							"% OFF".format(synthKey).postln;
+						});
+
+						"rotating %, introducing %".format(nowSynth, newSynth).postln;
+						synthKeyArray = synthKeyArray.rotate(-1);
+					})
+				})
+			});
+
+			/* =======  update memory ========= */
+
+			memory['pastAmp']         = memory['pastAmp'].addFirst(currentAmp);
+			memory['pastSilence']     = memory['pastSilence'].addFirst(currentSilence);
+			memory['pastFreq']        = memory['pastFreq'].addFirst(currentFreq);
+			memory['pastHasFreq']     = memory['pastHasFreq'].addFirst(currentHasFreq);
+			memory['pastCentroid']    = memory['pastCentroid'].addFirst(currentCentroid);
+			memory['pastFlatness']    = memory['pastFlatness'].addFirst(currentFlatness);
+			memory['pastDensity']     = memory['pastDensity'].addFirst(currentDensity);
+			memory['pastMeanIOI']     = memory['pastMeanIOI'].addFirst(currentMeanIOI);
+			memory['pastVarianceIOI'] = memory['pastVarianceIOI'].addFirst(currentVarianceIOI);
+
+			memory['bufferEvents']    = memory['bufferEvents'].addFirst(bufferEvent);
+			memory['events']          = memory['events'].addFirst(currentEvent);
+			memory['state']           = memory['state'].addFirst(state);
+
+		},'/analysis');
+	}
+
+	makeListenerKeep { |verbose = true|
 		var pollRateSec = 4;                        // this gets passed in? It should be the same arg as trigRate in the \analysis Ndef
 		var memLength = pollRateSec * 4;              // in seconds
 		var minPhraseLength = 45;                     // in seconds
@@ -207,8 +526,8 @@ EIDOLON {
 			}
 			{currentTime >= performanceLength}{state = "tacetDone"};  // this could also call some other function that neatly wraps up the performance?
 
-			if(verbose,{
-				"\rcurrentAmp: % \rrecentAmp: % \rcurrentSilence: % \rrecentSilence: % \rcurrentFreq: % \rrecentFreq: % \rcurrentHasFreq: % \rrecentHasFreq: % \ronsets: % \rcurrentCentroid: % \rrecentCentroid: % \rcurrentFlatness: % \rrecentFlatness: % \rcurrentDensity: % \rrecentDensity: % \rcurrentMeanIOI: % \rrecentMeanIOI: % \rcurrentVarianceIOI: % \rrecentVarianceIOI: % \rcurrentTime: %"
+			if(verbose,{"\ncurrentAmp: % \nrecentAmp: % \ncurrentSilence: % \nrecentSilence: % \ncurrentFreq: % \nrecentFreq: % \ncurrentHasFreq: % \nrecentHasFreq: % \nonsets: % \ncurrentCentroid: %
+recentCentroid: % \ncurrentFlatness: % \nrecentFlatness: % \ncurrentDensity: % \nrecentDensity: % \ncurrentMeanIOI: % \nrecentMeanIOI: % \ncurrentVarianceIOI: % \nrecentVarianceIOI: % \ncurrentTime: %"
 				.format(currentAmp, recentAmp, currentSilence, recentSilence, currentFreq, recentFreq, currentHasFreq, recentHasFreq, onsets, currentCentroid,recentCentroid, currentFlatness,
 					recentFlatness, currentDensity, recentDensity, currentMeanIOI, recentMeanIOI, currentVarianceIOI, recentVarianceIOI, currentTime).postln;
 
@@ -418,7 +737,7 @@ EIDOLON {
 
 			synthArrays.keysValuesDo({ |subLibKey,synthKeyArray|
 				synthKeyArray.do({ |synthKey|
-					var phraseDur = pollRateSec * performanceLength * 0.15;
+					var phraseDur = pollRateSec * performanceLength * 0.25;
 					if((memory['events'][..phraseDur.asInteger].indicesOfEqual(synthKey) ? 0).asArray.last == phraseDur,{  // does this work /make sense???
 						var nowSynth = synthKey;
 						var newSynth = synthKeyArray[1];
@@ -469,6 +788,21 @@ EIDOLON {
 				initVal: -inf,
 				layout: \vert,
 			).round_(1);
+			slide.numberView.align_(\center);
+			slide.labelView.align_(\center);
+		};
+
+		var linSlider = { |label,actionFunc|
+			var slide = EZSlider(
+				parent: window,
+				bounds: 60@300,
+				label: label,
+				labelHeight: 27,
+				controlSpec: \unipolar,
+				action: actionFunc,
+				initVal: 0,
+				layout: \vert,
+			).round_(0.01);
 			slide.numberView.align_(\center);
 			slide.labelView.align_(\center);
 		};
@@ -581,9 +915,9 @@ EIDOLON {
 			var amp = slider.value.dbamp;
 			Ndef(\listener).set(\silenceThresh,amp);
 		});
-		dbSlider.("ONSET THRESH",{ |slider|
-			var amp = slider.value.dbamp;
-			Ndef(\listener).set(\onsetThresh,amp);
+		linSlider.("ONSET THRESH",{ |slider|
+			var thresh = slider.value;
+			Ndef(\listener).set(\onsetThresh,thresh);
 		});
 
 		flow.left_(flow.bounds.width/2 + flow.gap.x);
